@@ -7,73 +7,132 @@ from datetime import datetime
 ISSUES_DIR = "issues"
 STATUS_RE = re.compile(r"^# \[(?P<status>[^\]]+)\] (?P<title>.+)$")
 VALID_TYPES = ["task", "bug", "feature", "refactor"]
+ISSUE_ID_RE = re.compile(r"^\d+$")
+SECTION_RE_TEMPLATE = r"\n## {heading}\n"
 
 
-def ensure_dir():
+def ensure_dir() -> None:
     os.makedirs(ISSUES_DIR, exist_ok=True)
 
 
-def issue_files():
+def issue_files() -> list[str]:
     return sorted(glob.glob(os.path.join(ISSUES_DIR, "*.md")))
 
 
-def parse_header(first_line):
+def parse_header(first_line: str) -> tuple[str, str]:
     match = STATUS_RE.match(first_line.strip())
     if not match:
-        return "OPEN", first_line.strip().lstrip("# ").strip()
+        title = first_line.strip()
+        if title.startswith("# "):
+            title = title[2:]
+        return "OPEN", title.strip()
     return match.group("status"), match.group("title")
 
 
-def normalize_slug(title):
+def normalize_slug(title: str) -> str:
     slug = "".join(c.lower() if c.isalnum() else "-" for c in title)
     slug = re.sub(r"-+", "-", slug).strip("-")
     return slug or "untitled"
 
 
-def next_issue_id():
+def sanitize_title(title: str) -> str:
+    collapsed = " ".join(title.splitlines()).strip()
+    return collapsed or "Untitled issue"
+
+
+def sanitize_description(description: str) -> str:
+    return description.strip() or "TODO"
+
+
+def next_issue_id() -> int:
     max_id = 0
     for path in issue_files():
         base = os.path.basename(path)
         issue_id = base.split("-", 1)[0]
-        if issue_id.isdigit():
+        if ISSUE_ID_RE.fullmatch(issue_id):
             max_id = max(max_id, int(issue_id))
     return max_id + 1
 
 
-def find_issue_path(issue_id):
-    normalized = str(issue_id).zfill(3) if str(issue_id).isdigit() else str(issue_id)
+def normalize_issue_id(issue_id: str | int) -> str | None:
+    issue_id_str = str(issue_id).strip()
+    if not ISSUE_ID_RE.fullmatch(issue_id_str):
+        return None
+    return issue_id_str.zfill(3)
+
+
+def find_issue_path(issue_id: str | int) -> str | None:
+    normalized = normalize_issue_id(issue_id)
+    if normalized is None:
+        return None
     matches = glob.glob(os.path.join(ISSUES_DIR, f"{normalized}*.md"))
-    return sorted(matches)[0] if matches else None
+    safe_matches = [
+        path
+        for path in matches
+        if os.path.abspath(path).startswith(os.path.abspath(ISSUES_DIR) + os.sep)
+    ]
+    return sorted(safe_matches)[0] if safe_matches else None
 
 
-def read_issue_file(path):
+def read_issue_file(path: str) -> str:
     with open(path, "r", encoding="utf-8") as handle:
         return handle.read()
 
 
-def write_issue_file(path, content):
+def write_issue_file(path: str, content: str) -> None:
     with open(path, "w", encoding="utf-8") as handle:
         handle.write(content)
 
 
-def append_section(content, heading, body):
+def create_issue_file(path: str, content: str) -> bool:
+    try:
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL)
+    except FileExistsError:
+        return False
+
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(content)
+    return True
+
+
+def append_section(content: str, heading: str, body: str) -> str:
     body = body.strip()
     if not body:
         return content
+
     stamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    section = f"\n\n## {heading}\n- {stamp} - {body}\n"
-    return content.rstrip() + section
+    entry = f"- {stamp} - {body}\n"
+    header = f"\n## {heading}\n"
+    pattern = re.compile(SECTION_RE_TEMPLATE.format(heading=re.escape(heading)))
+    match = pattern.search(content)
+    if not match:
+        return content.rstrip() + f"{header}{entry}"
+
+    insert_at = content.find("\n## ", match.end())
+    if insert_at == -1:
+        insert_at = len(content)
+
+    prefix = content[:insert_at].rstrip("\n")
+    suffix = content[insert_at:]
+    return f"{prefix}\n{entry}{suffix}"
 
 
-def replace_field(content, field, value):
+def replace_field(content: str, field: str, value: str) -> str:
     pattern = re.compile(rf"^\*\*{re.escape(field)}:\*\* .*?$", re.MULTILINE)
     replacement = f"**{field}:** {value}"
     if pattern.search(content):
         return pattern.sub(replacement, content, count=1)
-    return content.rstrip() + f"\n{replacement}\n"
+
+    first_section_index = content.find("\n## ")
+    if first_section_index == -1:
+        return content.rstrip() + f"\n\n{replacement}\n"
+
+    prefix = content[:first_section_index].rstrip("\n")
+    suffix = content[first_section_index:]
+    return f"{prefix}\n{replacement}\n{suffix}"
 
 
-def replace_status(content, new_status):
+def replace_status(content: str, new_status: str) -> str:
     lines = content.splitlines()
     if not lines:
         return content
@@ -82,14 +141,34 @@ def replace_status(content, new_status):
     return "\n".join(lines) + ("\n" if content.endswith("\n") else "")
 
 
-def field_value(line, field):
+def field_value(line: str, field: str) -> str | None:
     prefix = f"**{field}:** "
     if line.startswith(prefix):
         return line[len(prefix):].strip()
     return None
 
 
-def list_issues(_args):
+def parse_issue_meta(path: str) -> dict[str, str]:
+    lines = read_issue_file(path).splitlines()
+    status, title = parse_header(lines[0] if lines else "")
+    meta = {
+        "id": os.path.basename(path).split("-", 1)[0],
+        "status": status,
+        "title": title,
+        "type": "task",
+        "assignee": "Unassigned",
+        "created": "",
+    }
+    for line in lines:
+        stripped = line.strip()
+        for field in ("Type", "Assignee", "Created"):
+            value = field_value(stripped, field)
+            if value is not None:
+                meta[field.lower()] = value
+    return meta
+
+
+def list_issues(_args: argparse.Namespace) -> None:
     ensure_dir()
     files = issue_files()
     if not files:
@@ -99,20 +178,11 @@ def list_issues(_args):
     print(f"{'ID':<6} {'Status':<10} {'Type':<10} {'Title'}")
     print("-" * 100)
     for path in files:
-        with open(path, "r", encoding="utf-8") as handle:
-            lines = handle.readlines()
-        status, title = parse_header(lines[0] if lines else "")
-        issue_type = "task"
-        for line in lines:
-            value = field_value(line.strip(), "Type")
-            if value is not None:
-                issue_type = value
-                break
-        issue_id = os.path.basename(path).split("-", 1)[0]
-        print(f"{issue_id:<6} {status:<10} {issue_type:<10} {title}")
+        meta = parse_issue_meta(path)
+        print(f"{meta['id']:<6} {meta['status']:<10} {meta['type']:<10} {meta['title']}")
 
 
-def summary_issues(_args):
+def summary_issues(_args: argparse.Namespace) -> None:
     ensure_dir()
     files = issue_files()
     if not files:
@@ -120,52 +190,46 @@ def summary_issues(_args):
         return
 
     for path in files:
-        with open(path, "r", encoding="utf-8") as handle:
-            lines = handle.readlines()
-        status, title = parse_header(lines[0] if lines else "")
-        issue_type = "task"
-        assignee = "Unassigned"
-        created = ""
-        for line in lines:
-            stripped = line.strip()
-            value = field_value(stripped, "Type")
-            if value is not None:
-                issue_type = value
-                continue
-            value = field_value(stripped, "Assignee")
-            if value is not None:
-                assignee = value
-                continue
-            value = field_value(stripped, "Created")
-            if value is not None:
-                created = value
-        issue_id = os.path.basename(path).split("-", 1)[0]
-        created_part = f" | created {created}" if created else ""
-        print(f"{issue_id} | {status} | {issue_type} | {assignee} | {title}{created_part}")
+        meta = parse_issue_meta(path)
+        created_part = f" | created {meta['created']}" if meta["created"] else ""
+        print(
+            f"{meta['id']} | {meta['status']} | {meta['type']} | {meta['assignee']} | {meta['title']}{created_part}"
+        )
 
 
-def new_issue(args):
-    ensure_dir()
-    issue_id = next_issue_id()
-    filename = f"{issue_id:03d}-{normalize_slug(args.title)}.md"
-    path = os.path.join(ISSUES_DIR, filename)
-    content = f"""# [OPEN] {args.title}
+def build_issue_content(title: str, issue_type: str, assignee: str, description: str) -> str:
+    return f"""# [OPEN] {title}
 
 **Created:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-**Type:** {args.type}
-**Assignee:** {args.assignee}
+**Type:** {issue_type}
+**Assignee:** {assignee}
 
 ## Description
-{args.desc}
+{description}
 
 ## Acceptance Criteria
 - [ ] 
 """
-    write_issue_file(path, content)
-    print(f"Created issue: {path}")
 
 
-def read_issue(args):
+def new_issue(args: argparse.Namespace) -> None:
+    ensure_dir()
+    title = sanitize_title(args.title)
+    description = sanitize_description(args.desc)
+    slug = normalize_slug(title)
+    issue_id = next_issue_id()
+
+    while True:
+        filename = f"{issue_id:03d}-{slug}.md"
+        path = os.path.join(ISSUES_DIR, filename)
+        content = build_issue_content(title, args.type, args.assignee, description)
+        if create_issue_file(path, content):
+            print(f"Created issue: {path}")
+            return
+        issue_id += 1
+
+
+def read_issue(args: argparse.Namespace) -> None:
     path = find_issue_path(args.id)
     if not path:
         print(f"Issue {args.id} not found.")
@@ -173,7 +237,7 @@ def read_issue(args):
     print(read_issue_file(path))
 
 
-def close_issue(args):
+def close_issue(args: argparse.Namespace) -> None:
     path = find_issue_path(args.id)
     if not path:
         print(f"Issue {args.id} not found.")
@@ -187,28 +251,37 @@ def close_issue(args):
     print(f"Closed issue: {path}")
 
 
-def update_issue(args):
+def update_issue(args: argparse.Namespace) -> None:
     path = find_issue_path(args.id)
     if not path:
         print(f"Issue {args.id} not found.")
         return
     content = read_issue_file(path)
+    changed = False
     if args.assignee:
         content = replace_field(content, "Assignee", args.assignee)
+        changed = True
     if args.type:
         content = replace_field(content, "Type", args.type)
+        changed = True
     if args.status:
         content = replace_status(content, args.status.upper())
+        changed = True
     if args.note:
         content = append_section(content, "Progress Notes", args.note)
+        changed = True
+    if not changed:
+        print(f"No changes provided for issue {args.id}.")
+        return
     content = replace_field(content, "Updated", datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
     write_issue_file(path, content)
     print(f"Updated issue: {path}")
 
 
-def main():
-    parser = argparse.ArgumentParser()
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Manage markdown issues in the current project.")
     subparsers = parser.add_subparsers(dest="command")
+    subparsers.required = True
 
     p_list = subparsers.add_parser("list")
     p_list.set_defaults(func=list_issues)
@@ -241,10 +314,7 @@ def main():
     p_update.set_defaults(func=update_issue)
 
     args = parser.parse_args()
-    if hasattr(args, "func"):
-        args.func(args)
-    else:
-        parser.print_help()
+    args.func(args)
 
 
 if __name__ == "__main__":
