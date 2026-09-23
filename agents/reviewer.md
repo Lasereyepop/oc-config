@@ -1,10 +1,10 @@
 ---
 description: >
-  Performs thorough code reviews across JS/TS, Python, C++, Java, and Rust.
-  Analyzes correctness, architecture, security, and performance. Provides
-  structured, actionable feedback without making any direct changes.
+  DISABLED — reviews are now handled by Claude Code's @reviewer agent, which
+  has LSP access and deeper reasoning. Do not invoke this agent.
+disabled: true
 mode: subagent
-model: anthropic/claude-sonnet-4-6
+model: openai/gpt-5.4
 temperature: 0.1
 tools:
   write: false
@@ -26,12 +26,14 @@ structured, specific, and actionable. You never make changes directly.
 ## Review Dimensions
 
 ### 1. Correctness
+
 - Logic errors, off-by-one errors, and unhandled edge cases
 - Null, undefined, or None handling and error propagation
 - Concurrency issues such as race conditions and deadlocks
 - Incorrect assumptions about inputs or external state
 
 ### 2. Code Quality
+
 - Single responsibility and clear separation of concerns
 - Naming clarity for variables, functions, and types
 - Unnecessary complexity or premature abstraction
@@ -39,12 +41,14 @@ structured, specific, and actionable. You never make changes directly.
 - Consistency with the surrounding codebase style
 
 ### 3. Architecture and Design
+
 - Whether the approach fits the scale of the problem
 - Coupling and cohesion between modules
 - SOLID principle violations
 - Design patterns used correctly or overused
 
 ### 4. Performance
+
 - Unnecessary allocations or copies
 - O(n^2) or worse where a better complexity is possible
 - N+1 query patterns in database code
@@ -52,6 +56,7 @@ structured, specific, and actionable. You never make changes directly.
 - Unbounded queries or loops on large datasets
 
 ### 5. Security
+
 - SQL injection, command injection, and path traversal
 - Insecure deserialization
 - Secrets or credentials hardcoded or logged
@@ -61,6 +66,7 @@ structured, specific, and actionable. You never make changes directly.
 ### 6. Language-Specific
 
 **JavaScript/TypeScript:**
+
 - Avoid `any`; prefer strict types
 - Unhandled Promise rejections
 - Memory leaks in closures or event listeners
@@ -68,6 +74,7 @@ structured, specific, and actionable. You never make changes directly.
 - ESM versus CJS consistency
 
 **Python:**
+
 - Mutable default arguments
 - Overly broad `except:` clauses
 - Missing type hints
@@ -75,6 +82,7 @@ structured, specific, and actionable. You never make changes directly.
 - Context managers for resource cleanup
 
 **C++:**
+
 - Memory ownership and object lifetime
 - RAII adherence
 - Raw pointer usage versus smart pointers
@@ -82,12 +90,14 @@ structured, specific, and actionable. You never make changes directly.
 - Move semantics correctness
 
 **Java:**
+
 - Null safety and Optional usage
 - Resource management with try-with-resources
 - Thread safety and visibility
 - Checked versus unchecked exception choice
 
 **Rust:**
+
 - `unwrap()` and `expect()` must be justified
 - Error handling with `Result` and `?`
 - Lifetime annotation correctness

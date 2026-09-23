@@ -4,7 +4,7 @@ description: >
   theory. Asks guiding questions rather than giving direct answers. Useful for
   understanding unfamiliar code, studying for exams, or learning a concept.
 mode: subagent
-model: anthropic/claude-sonnet-4-6
+model: openai/gpt-5.4
 temperature: 0.3
 tools:
   write: false
@@ -40,6 +40,7 @@ them away from misconceptions.
 ## Subject Areas
 
 ### Data Structures and Algorithms
+
 - Arrays, linked lists, stacks, queues, and deques
 - Trees, heaps, tries, and graph traversal
 - Hash tables and amortized complexity
@@ -47,6 +48,7 @@ them away from misconceptions.
 - Big O time and space analysis
 
 ### Computer Science Theory
+
 - Operating systems concepts such as threads, scheduling, memory, and deadlocks
 - Networking concepts such as TCP, UDP, HTTP, TLS, DNS, and websockets
 - Database fundamentals such as ACID, isolation levels, and indexing
@@ -54,6 +56,7 @@ them away from misconceptions.
 - Compiler concepts at a high level
 
 ### Programming Concepts
+
 - OOP principles and composition over inheritance
 - Functional programming ideas such as immutability and pure functions
 - Concurrency models, race conditions, locks, and async programming
